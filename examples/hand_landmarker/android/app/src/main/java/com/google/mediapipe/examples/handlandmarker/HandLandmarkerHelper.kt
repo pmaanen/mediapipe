@@ -31,6 +31,9 @@ import com.google.mediapipe.tasks.core.Delegate
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarkerResult
+import edu.ucsd.sccn.LSL
+import edu.ucsd.sccn.LSL.IRREGULAR_RATE
+import edu.ucsd.sccn.LSL.StreamOutlet
 
 class HandLandmarkerHelper(
     var minHandDetectionConfidence: Float = DEFAULT_HAND_DETECTION_CONFIDENCE,
@@ -43,6 +46,17 @@ class HandLandmarkerHelper(
     // this listener is only used when running in RunningMode.LIVE_STREAM
     val handLandmarkerHelperListener: LandmarkerListener? = null
 ) {
+
+    private val mStreamOutlets =  mapOf("Right" to StreamOutlet(
+        LSL.StreamInfo(
+            "RightHand", "other", 21 * 3,
+            IRREGULAR_RATE, LSL.ChannelFormat.float32, "localhost"
+        )
+    ), "Left" to StreamOutlet(
+        LSL.StreamInfo(
+            "LeftHand", "other", 21 * 3,
+            IRREGULAR_RATE, LSL.ChannelFormat.float32, "localhost"
+        )))
 
     // For this example this needs to be a var so it can be reset on changes.
     // If the Hand Landmarker will not change, a lazy val would be preferable.
@@ -76,6 +90,7 @@ class HandLandmarkerHelper(
             DELEGATE_CPU -> {
                 baseOptionBuilder.setDelegate(Delegate.CPU)
             }
+
             DELEGATE_GPU -> {
                 baseOptionBuilder.setDelegate(Delegate.GPU)
             }
@@ -92,6 +107,7 @@ class HandLandmarkerHelper(
                     )
                 }
             }
+
             else -> {
                 // no-op
             }
@@ -332,9 +348,19 @@ class HandLandmarkerHelper(
         result: HandLandmarkerResult,
         input: MPImage
     ) {
+        for (idx in result.handednesses().indices) {
+            var samples = mutableListOf<Float>()
+            result.worldLandmarks().get(idx).forEach {
+                samples.add(it.x())
+                samples.add(it.y())
+                samples.add(it.z())
+            }
+            mStreamOutlets.get(result.handednesses().get(idx).get(0).categoryName())?.push_sample(samples.toFloatArray())
+        }
+
         val finishTimeMs = SystemClock.uptimeMillis()
         val inferenceTime = finishTimeMs - result.timestampMs()
-
+        result.worldLandmarks().size
         handLandmarkerHelperListener?.onResults(
             ResultBundle(
                 listOf(result),
@@ -346,7 +372,7 @@ class HandLandmarkerHelper(
     }
 
     // Return errors thrown during detection to this HandLandmarkerHelper's
-    // caller
+// caller
     private fun returnLivestreamError(error: RuntimeException) {
         handLandmarkerHelperListener?.onError(
             error.message ?: "An unknown error has occurred"
